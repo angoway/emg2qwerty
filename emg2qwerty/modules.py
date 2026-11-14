@@ -6,6 +6,7 @@
 
 from collections.abc import Sequence
 
+import math
 import torch
 from torch import nn
 
@@ -278,3 +279,100 @@ class TDSConvEncoder(nn.Module):
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.tds_conv_blocks(inputs)  # (T, N, num_features)
+
+
+class PositionalEncoding(nn.Module):
+    """
+        pe: (T_max_length, 1, d_model)
+    """
+    def __init__(
+        self, 
+        d_model: int, 
+        T_max_length: int = 10000, 
+        dropout=0.1
+    ) -> None:
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        # Precompute positional encodings using exponentially decreasing frequencies.
+        position = torch.arange(0, T_max_length).unsqueeze(1)
+        frequencies = torch.exp(
+            torch.arange(0, d_model, 2) * -(math.log(10000.0) / d_model)
+        )
+
+        pe = torch.zeros(T_max_length, d_model)
+        pe[:, 0::2] = torch.sin(position * frequencies)
+
+        # Match the frequencies to the number of odd-indexed dimensions.
+        num_odd_dimensions = pe[:, 1::2].shape[1]
+        pe[:, 1::2] = torch.cos(
+            position * frequencies[:num_odd_dimensions]
+        )
+
+        pe = pe.unsqueeze(1)
+        self.register_buffer("pe", pe)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        """
+        Args: 
+            inputs: (T, N, d_model)
+        
+        Returns:
+            torch.Tensor: (T, N, d_model), input embeddings with 
+                          positional encodings added and dropout applied.
+        """
+        x = inputs
+        T = x.shape[0]
+        return self.dropout(x + self.pe[:T])
+
+
+class TransformerEncoder(nn.Module):
+    def __init__(
+        self, 
+        num_classes, 
+        num_features: int, 
+        d_model: int, 
+        nhead: int, 
+        num_layers: int,
+        dim_ff: int, 
+        dropout: float, 
+        max_len: int
+    ) -> None:
+        super().__init__()
+
+        self.in_proj = nn.Linear(num_features, d_model)
+        self.positional_encoding = PositionalEncoding(
+            d_model, 
+            max_len, 
+            dropout=dropout
+        )
+
+        layer = nn.TransformerEncoderLayer(
+            d_model, 
+            nhead, 
+            dim_ff, 
+            dropout, 
+            batch_first=False, 
+            norm_first=True
+        )
+
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer=layer,
+            num_layers=num_layers,
+            norm=nn.LayerNorm(d_model),
+            enable_nested_tensor=False
+        )
+
+        self.CTC_head = nn.Sequential(
+            nn.Linear(d_model, num_classes),
+            nn.LogSoftmax(dim=-1)
+        )
+
+        for p in self.encoder.layers.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(self, inputs: torch.Tensor, mask=None, key_padding_mask=None) -> torch.Tensor:
+        x = self.positional_encoding(self.in_proj(inputs))
+        x = self.encoder(x, mask=mask, src_key_padding_mask=key_padding_mask)
+        return self.CTC_head(x)

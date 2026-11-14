@@ -14,8 +14,8 @@ __pycache__/
 
 # Build and Environments
 .condaenv
-.env
-.venv
+*env
+*venv
 env/
 venv/
 ENV/
