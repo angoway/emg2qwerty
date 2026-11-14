@@ -373,6 +373,19 @@ class TransformerEncoder(nn.Module):
                 nn.init.xavier_uniform_(p)
 
     def forward(self, inputs: torch.Tensor, mask=None, key_padding_mask=None) -> torch.Tensor:
+        max_len = self.positional_encoding.pe.shape[0]
+
+        # Process long sequences in chunks to avoid full-session attention.
+        if inputs.shape[0] > max_len:
+            emissions = []
+
+            for start in range(0, inputs.shape[0], max_len):
+                chunk = inputs[start:start + max_len]
+                emissions.append(self.forward(chunk))
+
+            return torch.cat(emissions, dim=0)
+
         x = self.positional_encoding(self.in_proj(inputs))
         x = self.encoder(x, mask=mask, src_key_padding_mask=key_padding_mask)
         return self.CTC_head(x)
+    
