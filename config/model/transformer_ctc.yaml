@@ -9,6 +9,7 @@ module:
   dim_ff: 1024
   dropout: 0.1
   max_len: 622          # placeholder: must be >= longest test session in frames
+  optimizer: adamw
 
 datamodule:
   _target_: emg2qwerty.lightning.WindowedEMGDataModule

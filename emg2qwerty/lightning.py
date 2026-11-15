@@ -347,9 +347,8 @@ class TransformerCTCModule(pl.LightningModule):
 
         emissions = self.forward(inputs)
 
-        # Transformer preserves the temporal dimension, so output lengths
-        # are the same as the original input lengths.
-        emission_lengths = input_lengths
+        T_diff = inputs.shape[0] - emissions.shape[0]
+        emission_lengths = input_lengths - T_diff
 
         loss = self.ctc_loss(
             log_probs=emissions,  # (T, N, num_classes)
@@ -364,6 +363,23 @@ class TransformerCTCModule(pl.LightningModule):
             emission_lengths=emission_lengths.detach().cpu().numpy(),
         )
 
+        # Log blank token probability during validation steps
+        if phase == "val":
+            predicted_classes = emissions.argmax(dim=-1)
+
+            blank_fraction = (
+                predicted_classes == charset().null_class
+            ).float().mean()
+
+            blank_probability = (
+                emissions.exp()[:, :, charset().null_class]
+            ).mean()
+
+            print(f"Epoch: {self.current_epoch}")
+            print(f"Loss: {loss.item():.4f}")  # Put this after loss is calculated
+            print(f"Blank fraction: {blank_fraction.item():.4f}")
+            print(f"Mean blank probability: {blank_probability.item():.4f}")
+
         # Update metrics
         metrics = self.metrics[f"{phase}_metrics"]
         targets = targets.detach().cpu().numpy()
@@ -371,6 +387,13 @@ class TransformerCTCModule(pl.LightningModule):
         for i in range(N):
             # Unpad targets (T, N) for batch entry
             target = LabelData.from_labels(targets[: target_lengths[i], i])
+
+            # Log decoded predictions during validation
+            if phase == "val" and i == 0:
+                print(f"\nEpoch: {self.current_epoch}")
+                print(f"Prediction: {predictions[i]}")
+                print(f"Target:     {target}\n")
+
             metrics.update(prediction=predictions[i], target=target)
 
         self.log(f"{phase}/loss", loss, batch_size=N, sync_dist=True)
