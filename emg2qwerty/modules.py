@@ -240,6 +240,53 @@ class TDSFullyConnectedBlock(nn.Module):
         return self.layer_norm(x)  # TNC
 
 
+class RNNEncoder(nn.Module):
+    """A recurrent temporal encoder that operates over the sequence dimension.
+
+    Args:
+        input_size (int): Number of input features per timestep.
+        hidden_size (int): Hidden size for the recurrent layer.
+        num_layers (int): Number of stacked recurrent layers.
+        rnn_type (str): Either "gru" or "lstm".
+        bidirectional (bool): Whether to use a bidirectional recurrent layer.
+        dropout (float): Dropout between recurrent layers.
+    """
+
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int = 2,
+        rnn_type: str = "gru",
+        bidirectional: bool = True,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__()
+        assert rnn_type.lower() in {"gru", "lstm"}, (
+            "Unsupported rnn_type. Expected 'gru' or 'lstm'."
+        )
+
+        self.rnn_type = rnn_type.lower()
+        self.hidden_size = hidden_size
+        self.bidirectional = bidirectional
+        self.num_layers = num_layers
+        self.dropout = dropout
+
+        rnn_cls = nn.GRU if self.rnn_type == "gru" else nn.LSTM
+        self.rnn = rnn_cls(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=False,
+            bidirectional=bidirectional,
+            dropout=dropout if num_layers > 1 else 0.0,
+        )
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        outputs, _ = self.rnn(inputs)
+        return outputs
+
+
 class TDSConvEncoder(nn.Module):
     """A time depth-separable convolutional encoder composing a sequence
     of `TDSConv2dBlock` and `TDSFullyConnectedBlock` as per
